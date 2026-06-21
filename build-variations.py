@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""
+build-variations.py  —  embed extra style variations into index.html
+
+The catalog (index.html) shows one card per style. Clicking a card opens a
+per-style "variations" page. Variation 1 of every style is the render already
+embedded in its card. This script embeds Variation 2, 3, ... from render files.
+
+WHERE RENDERS LIVE
+  Default: ~/Projects/.chatgpt-image-gen/stillgrove-trends/
+  Override with the STILLGROVE_RENDERS env var.
+
+FILE NAMING CONVENTION (this is how a new variation "appears")
+  Variation 1 (already in the card, do NOT add here):
+      trend-<NN>-<slug>-studio.png
+      trend-<NN>-<slug>-lifestyle.png
+  Extra variations (this script picks these up):
+      trend-<NN>-<slug>-v<K>-studio.png       <- required  (K = 2,3,4,...)
+      trend-<NN>-<slug>-v<K>-lifestyle.png     <- optional
+  <NN> must match the card's catalog number. The studio image is required;
+  the in-room (lifestyle) image is optional. Add files, run this, redeploy.
+
+USAGE
+  python3 build-variations.py            # rebuild EXTRA_VARIATIONS in index.html
+  python3 build-variations.py --dry-run  # report what it would embed, no write
+
+It rewrites only the block between
+  /* === STILLGROVE_VARIATIONS_START ... */ ... /* === STILLGROVE_VARIATIONS_END === */
+so it is safe to run repeatedly and never touches the rest of the page.
+"""
+import os, re, io, sys, json, base64
+
+HERE    = os.path.dirname(os.path.abspath(__file__))
+INDEX   = os.environ.get("STILLGROVE_INDEX", os.path.join(HERE, "index.html"))
+RENDERS = os.environ.get(
+    "STILLGROVE_RENDERS",
+    os.path.expanduser("~/Projects/.chatgpt-image-gen/stillgrove-trends"),
+)
+THUMB_W = 480     # match the existing in-card thumbnails (480x720)
+JPEG_Q  = 72
+DRY     = "--dry-run" in sys.argv
+
+PAT = re.compile(r'^trend-(\d+)-(.+?)-v(\d+)-(studio|lifestyle)\.png$', re.I)
+START = "/* === STILLGROVE_VARIATIONS_START"
+END   = "/* === STILLGROVE_VARIATIONS_END === */"
+
+
+def thumb_data_uri(path):
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    if w > THUMB_W:
+        im = im.resize((THUMB_W, round(h * THUMB_W / w)), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=JPEG_Q, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def collect():
+    if not os.path.isdir(RENDERS):
+        print(f"renders dir not found: {RENDERS}"); return {}
+    groups = {}  # num -> { k -> {studio,life} }
+    for fn in sorted(os.listdir(RENDERS)):
+        m = PAT.match(fn)
+        if not m:
+            continue
+        num, k, kind = int(m.group(1)), int(m.group(3)), m.group(4).lower()
+        slot = "studio" if kind == "studio" else "life"
+        groups.setdefault(num, {}).setdefault(k, {})[slot] = os.path.join(RENDERS, fn)
+    return groups
+
+
+def main():
+    groups = collect()
+    extra, total = {}, 0
+    for num in sorted(groups):
+        arr = []
+        for k in sorted(groups[num]):
+            imgs = groups[num][k]
+            if "studio" not in imgs:
+                print(f"  skip trend-{num} v{k}: missing studio image"); continue
+            entry = {"label": f"Variation {k}", "studio": "<studio>" if DRY else thumb_data_uri(imgs["studio"])}
+            if "life" in imgs:
+                entry["life"] = "<life>" if DRY else thumb_data_uri(imgs["life"])
+            arr.append(entry); total += 1
+            print(f"  trend-{num} v{k}: {'studio+in-room' if 'life' in imgs else 'studio only'}")
+        if arr:
+            extra[num] = arr
+
+    block_inner = "const EXTRA_VARIATIONS = " + json.dumps(extra, separators=(",", ":")) + ";"
+    print(f"\n{total} extra variation(s) across {len(extra)} style(s).")
+    if DRY:
+        print("dry-run: index.html not modified."); return
+
+    html = open(INDEX, encoding="utf-8").read()
+    s = html.find(START); e = html.find(END)
+    if s == -1 or e == -1:
+        print("FATAL: variation markers not found in index.html"); sys.exit(1)
+    line_start = html.rfind("\n", 0, s) + 1  # keep marker comment line, replace the const line
+    head = html[:s]
+    new_block = (html[s:e].split("\n")[0] + "\n" + block_inner + "\n" + END)
+    html2 = head + new_block + html[e + len(END):]
+    open(INDEX, "w", encoding="utf-8").write(html2)
+    print(f"updated {INDEX}")
+
+
+if __name__ == "__main__":
+    main()
