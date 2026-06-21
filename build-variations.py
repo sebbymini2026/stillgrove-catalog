@@ -7,7 +7,7 @@ per-style "variations" page. Variation 1 of every style is the render already
 embedded in its card. This script embeds Variation 2, 3, ... from render files.
 
 WHERE RENDERS LIVE
-  Default: ~/Projects/.chatgpt-image-gen/stillgrove-trends/
+  Default: ~/Projects/Stillgrove/renders/
   Override with the STILLGROVE_RENDERS env var.
 
 FILE NAMING CONVENTION (this is how a new variation "appears")
@@ -34,7 +34,7 @@ HERE    = os.path.dirname(os.path.abspath(__file__))
 INDEX   = os.environ.get("STILLGROVE_INDEX", os.path.join(HERE, "index.html"))
 RENDERS = os.environ.get(
     "STILLGROVE_RENDERS",
-    os.path.expanduser("~/Projects/.chatgpt-image-gen/stillgrove-trends"),
+    os.path.expanduser("~/Projects/Stillgrove/renders"),
 )
 THUMB_W = 480     # match the existing in-card thumbnails (480x720)
 JPEG_Q  = 72
