@@ -53,6 +53,7 @@ details .links a{font-size:11px;margin-right:10px;color:var(--muted);}
 .inspcap .ilbl{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:2px;}
 .inspcap a{display:block;margin-top:4px;font-size:11px;color:var(--muted);}
 footer{padding:0 26px 40px;color:var(--muted);font-size:12px;}
+.draghandle{position:absolute;top:10px;right:10px;z-index:4;background:rgba(255,255,255,.93);border:1px solid var(--line);border-radius:8px;padding:2px 8px 4px;font-size:15px;line-height:1;color:var(--forest);cursor:grab;box-shadow:0 1px 4px rgba(0,0,0,.14);user-select:none;}.draghandle:active{cursor:grabbing;}.card.dragging{opacity:.4;outline:2px dashed var(--forest);outline-offset:-2px;}.toolbtn{border:1px solid var(--line);background:#fff;color:var(--forest);padding:7px 12px;border-radius:999px;font-size:13px;cursor:pointer;font-weight:500;}.toolbtn:hover{background:var(--sage);}.draghint{font-size:11px;color:var(--muted);}.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);background:var(--forest);color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.28);opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;z-index:50;}.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style></head><body>
 <header>
   <h1>STILLGROVE · Trend → Bonsai Wall Art Catalog</h1>
@@ -63,11 +64,11 @@ footer{padding:0 26px 40px;color:var(--muted);font-size:12px;}
   <span class="spacer"></span>
   <input id="q" placeholder="Search name / trend / DNA…">
   <select id="sort">
-    <option value="num">Sort: catalog #</option>
+    <option value="custom" selected>Order: my arrangement</option><option value="num">Sort: catalog #</option>
     <option value="plow">Sort: price (low→high)</option>
     <option value="phigh">Sort: price (high→low)</option>
   </select>
-  <span class="count" id="count"></span>
+  <button class="toolbtn" id="publishBtn" title="Make this order the default on every device">⬆ Publish order</button><button class="toolbtn" id="resetBtn" title="Revert to the published default order">↺ Reset</button><span class="draghint">Drag the ⠿ grip to reorder</span><span class="count" id="count"></span>
 </div>
 <div class="grid" id="grid">
 <article class="card" data-cat="Mirrors" data-name="garden window arched moss panel crittall-style arched window mirror (stepped/arched mirror) arch silhouette + black grid muntins = the illusion of a real window/view." data-price="345" data-num="1">
@@ -716,7 +717,13 @@ footer{padding:0 26px 40px;color:var(--muted);font-size:12px;}
 <script>
 const grid=document.getElementById('grid');
 const cards=[...grid.children];
+const DEFAULT_ORDER=cards.map(c=>+c.dataset.num);
+const PUBLISHED_ORDER=null; /* CLAUDE: set to an array like [3,1,2,...] to publish a default order to every device */
 let curCat='All';
+let customOrder=null;
+try{const s=JSON.parse(localStorage.getItem('stillgrove_order'));if(Array.isArray(s)&&s.length===cards.length)customOrder=s;}catch(e){}
+if(!customOrder)customOrder=(Array.isArray(PUBLISHED_ORDER)&&PUBLISHED_ORDER.length===cards.length)?PUBLISHED_ORDER.slice():DEFAULT_ORDER.slice();
+
 function apply(){
   const q=document.getElementById('q').value.trim().toLowerCase();
   let vis=cards.filter(c=>{
@@ -726,14 +733,73 @@ function apply(){
     return okc&&okq;
   });
   const s=document.getElementById('sort').value;
-  vis.sort((a,b)=> s==='num'?a.dataset.num-b.dataset.num : s==='plow'?a.dataset.price-b.dataset.price : b.dataset.price-a.dataset.price);
+  if(s==='custom'){vis.sort((a,b)=>customOrder.indexOf(+a.dataset.num)-customOrder.indexOf(+b.dataset.num));}
+  else{vis.sort((a,b)=> s==='num'?a.dataset.num-b.dataset.num : s==='plow'?a.dataset.price-b.dataset.price : b.dataset.price-a.dataset.price);}
   vis.forEach(c=>grid.appendChild(c));
   document.getElementById('count').textContent=vis.length+' shown';
 }
+
+/* ---- drag to reorder ---- */
+let dragEl=null;
+function commitOrder(){
+  customOrder=[...grid.children].map(c=>+c.dataset.num);
+  try{localStorage.setItem('stillgrove_order',JSON.stringify(customOrder));}catch(e){}
+  const sel=document.getElementById('sort');if(sel.value!=='custom')sel.value='custom';
+  apply();
+}
+function getDragAfterElement(x,y){
+  const els=[...grid.querySelectorAll('.card:not(.dragging)')].filter(c=>c.style.display!=='none');
+  let best=null,bestDist=Infinity,before=true;
+  for(const el of els){
+    const b=el.getBoundingClientRect();
+    const cx=b.left+b.width/2,cy=b.top+b.height/2;
+    const d=Math.hypot(x-cx,y-cy);
+    if(d<bestDist){bestDist=d;best=el;before=(y<cy-2)||(Math.abs(y-cy)<=b.height/2&&x<cx);}
+  }
+  if(!best)return null;
+  return before?best:best.nextElementSibling;
+}
+function enableDrag(card){
+  const wrap=card.querySelector('.imgwrap')||card;
+  const h=document.createElement('div');
+  h.className='draghandle';h.textContent='⠿';h.title='Drag to reorder';h.setAttribute('aria-label','Drag to reorder');
+  h.addEventListener('mousedown',()=>{card.draggable=true;});
+  h.addEventListener('mouseup',()=>{card.draggable=false;});
+  card.addEventListener('dragstart',e=>{dragEl=card;card.classList.add('dragging');e.dataTransfer.effectAllowed='move';try{e.dataTransfer.setData('text/plain','');}catch(_){}});
+  card.addEventListener('dragend',()=>{card.classList.remove('dragging');card.draggable=false;if(dragEl){dragEl=null;commitOrder();}});
+  wrap.appendChild(h);
+}
+grid.addEventListener('dragover',e=>{
+  if(!dragEl)return;e.preventDefault();e.dataTransfer.dropEffect='move';
+  const after=getDragAfterElement(e.clientX,e.clientY);
+  if(after==null)grid.appendChild(dragEl);
+  else if(after!==dragEl)grid.insertBefore(dragEl,after);
+});
+grid.addEventListener('drop',e=>{if(dragEl)e.preventDefault();});
+
+/* ---- toolbar ---- */
+let toastT;
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),3200);}
+document.getElementById('publishBtn').onclick=async()=>{
+  const order=[...grid.children].map(c=>+c.dataset.num);
+  const txt='PUBLISH_ORDER='+JSON.stringify(order);
+  try{await navigator.clipboard.writeText(txt);toast('Order copied — paste it to Claude to publish to every device.');}
+  catch(e){window.prompt('Copy this line and paste it to Claude to publish:',txt);}
+};
+document.getElementById('resetBtn').onclick=()=>{
+  try{localStorage.removeItem('stillgrove_order');}catch(e){}
+  customOrder=(Array.isArray(PUBLISHED_ORDER)&&PUBLISHED_ORDER.length===cards.length)?PUBLISHED_ORDER.slice():DEFAULT_ORDER.slice();
+  document.getElementById('sort').value='custom';apply();toast('Reset to the published default order.');
+};
+
+/* ---- existing controls ---- */
 document.querySelectorAll('.catbtn').forEach(b=>b.onclick=()=>{document.querySelectorAll('.catbtn').forEach(x=>x.classList.remove('on'));b.classList.add('on');curCat=b.dataset.cat;apply();});
 document.getElementById('q').oninput=apply;
 document.getElementById('sort').onchange=apply;
 grid.addEventListener('click',e=>{const t=e.target;if(t.matches('.toggle button')){const card=t.closest('.card');card.classList.toggle('showlife',t.dataset.v==='life');card.querySelectorAll('.toggle button').forEach(x=>x.classList.toggle('on',x===t));}});
+
+cards.forEach(enableDrag);
+document.getElementById('sort').value='custom';
 apply();
 </script>
-</body></html>
+<div class="toast" id="toast"></div></body></html>
