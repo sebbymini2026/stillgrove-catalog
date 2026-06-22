@@ -28,7 +28,7 @@ It rewrites only the block between
   /* === STILLGROVE_VARIATIONS_START ... */ ... /* === STILLGROVE_VARIATIONS_END === */
 so it is safe to run repeatedly and never touches the rest of the page.
 """
-import os, re, io, sys, json, base64, hashlib
+import os, re, io, sys, json, base64, hashlib, urllib.parse
 
 HERE    = os.path.dirname(os.path.abspath(__file__))
 INDEX   = os.environ.get("STILLGROVE_INDEX", os.path.join(HERE, "index.html"))
@@ -50,6 +50,31 @@ try:
         CREDITS = json.load(_cf)
 except Exception:
     CREDITS = {}
+
+# Optional source-artwork map for the "inspiration" panel beside each variation:
+# {num: {k: "<Wikimedia Commons filename>"}} — ONLY public-domain works are listed,
+# so only PD images are ever embedded; everything else gets a search link instead.
+SOURCES_PATH = os.environ.get("STILLGROVE_ART_SOURCES", os.path.join(HERE, "..", "pipeline", "art-sources.json"))
+try:
+    with open(SOURCES_PATH, encoding="utf-8") as _sf:
+        ART_SOURCES = json.load(_sf)
+except Exception:
+    ART_SOURCES = {}
+
+
+def inspiration(num, k, credit):
+    """(img, link, note) for the source artwork shown beside a variation.
+    PD pieces (in art-sources.json) -> real Wikimedia image + Commons link.
+    Everything else -> a 'see the artwork' search link, no reproduction."""
+    fname = (ART_SOURCES.get(str(num)) or {}).get(str(k))
+    if fname:
+        enc = urllib.parse.quote(fname)
+        return (f"https://commons.wikimedia.org/wiki/Special:FilePath/{enc}?width=600",
+                f"https://commons.wikimedia.org/wiki/File:{enc}",
+                f"{credit} — public domain, via Wikimedia Commons" if credit else "Public domain, via Wikimedia Commons")
+    if credit:
+        return ("", f"https://www.google.com/search?q={urllib.parse.quote(credit.replace('After ', ''))}", credit)
+    return ("", "", "")
 
 PAT = re.compile(r'^trend-(\d+)-(.+?)-v(\d+)-(studio|lifestyle)\.png$', re.I)
 START = "/* === STILLGROVE_VARIATIONS_START"
@@ -105,13 +130,17 @@ def main():
                 print(f"  skip trend-{num} v{k}: duplicate of {seen_md5[digest]}"); skipped_dup += 1; continue
             seen_md5[digest] = f"trend-{num} v{k}"
             credit = (CREDITS.get(str(num)) or {}).get(str(k))
+            insp_img, insp_link, insp_note = inspiration(num, k, credit)
             entry = {"label": credit or f"Variation {k}",
                      "note": f"Variation {k}" if credit else "",
                      "studio": "<studio>" if DRY else thumb_data_uri(imgs["studio"])}
+            if insp_img:  entry["inspImg"] = insp_img
+            if insp_link: entry["inspLink"] = insp_link
+            if insp_note: entry["inspNote"] = insp_note
             if "life" in imgs:
                 entry["life"] = "<life>" if DRY else thumb_data_uri(imgs["life"])
             arr.append(entry); total += 1
-            print(f"  trend-{num} v{k}: {credit or '(no credit)'}")
+            print(f"  trend-{num} v{k}: {credit or '(no credit)'}{'  [+PD image]' if insp_img else ''}")
         if arr:
             extra[num] = arr
 
