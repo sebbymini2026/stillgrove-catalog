@@ -28,7 +28,7 @@ It rewrites only the block between
   /* === STILLGROVE_VARIATIONS_START ... */ ... /* === STILLGROVE_VARIATIONS_END === */
 so it is safe to run repeatedly and never touches the rest of the page.
 """
-import os, re, io, sys, json, base64
+import os, re, io, sys, json, base64, hashlib
 
 HERE    = os.path.dirname(os.path.abspath(__file__))
 INDEX   = os.environ.get("STILLGROVE_INDEX", os.path.join(HERE, "index.html"))
@@ -81,15 +81,29 @@ def collect():
     return groups
 
 
+def _md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def main():
     groups = collect()
-    extra, total = {}, 0
+    extra, total, skipped_dup = {}, 0, 0
+    seen_md5 = {}  # md5 -> first "trend-N vK" that used it (render order = numeric num,k)
     for num in sorted(groups):
         arr = []
         for k in sorted(groups[num]):
             imgs = groups[num][k]
             if "studio" not in imgs:
                 print(f"  skip trend-{num} v{k}: missing studio image"); continue
+            # Skip byte-identical duplicates (stale images saved when ChatGPT was rate-capped).
+            digest = _md5(imgs["studio"])
+            if digest in seen_md5:
+                print(f"  skip trend-{num} v{k}: duplicate of {seen_md5[digest]}"); skipped_dup += 1; continue
+            seen_md5[digest] = f"trend-{num} v{k}"
             credit = (CREDITS.get(str(num)) or {}).get(str(k))
             entry = {"label": credit or f"Variation {k}",
                      "note": f"Variation {k}" if credit else "",
@@ -102,7 +116,7 @@ def main():
             extra[num] = arr
 
     block_inner = "const EXTRA_VARIATIONS = " + json.dumps(extra, separators=(",", ":")) + ";"
-    print(f"\n{total} extra variation(s) across {len(extra)} style(s).")
+    print(f"\n{total} extra variation(s) across {len(extra)} style(s); {skipped_dup} duplicate(s) skipped.")
     if DRY:
         print("dry-run: index.html not modified."); return
 
