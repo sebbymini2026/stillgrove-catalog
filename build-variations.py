@@ -40,6 +40,17 @@ THUMB_W = 480     # match the existing in-card thumbnails (480x720)
 JPEG_Q  = 72
 DRY     = "--dry-run" in sys.argv
 
+# Optional art-inspiration credits: {num: {k: "After Artist — Work (year)"}}.
+# Used as each variation's label so the catalog lists the exact source artwork.
+CREDITS_PATH = os.environ.get(
+    "STILLGROVE_CREDITS", os.path.join(HERE, "..", "pipeline", "credits.json")
+)
+try:
+    with open(CREDITS_PATH, encoding="utf-8") as _cf:
+        CREDITS = json.load(_cf)
+except Exception:
+    CREDITS = {}
+
 PAT = re.compile(r'^trend-(\d+)-(.+?)-v(\d+)-(studio|lifestyle)\.png$', re.I)
 START = "/* === STILLGROVE_VARIATIONS_START"
 END   = "/* === STILLGROVE_VARIATIONS_END === */"
@@ -79,11 +90,14 @@ def main():
             imgs = groups[num][k]
             if "studio" not in imgs:
                 print(f"  skip trend-{num} v{k}: missing studio image"); continue
-            entry = {"label": f"Variation {k}", "studio": "<studio>" if DRY else thumb_data_uri(imgs["studio"])}
+            credit = (CREDITS.get(str(num)) or {}).get(str(k))
+            entry = {"label": credit or f"Variation {k}",
+                     "note": f"Variation {k}" if credit else "",
+                     "studio": "<studio>" if DRY else thumb_data_uri(imgs["studio"])}
             if "life" in imgs:
                 entry["life"] = "<life>" if DRY else thumb_data_uri(imgs["life"])
             arr.append(entry); total += 1
-            print(f"  trend-{num} v{k}: {'studio+in-room' if 'life' in imgs else 'studio only'}")
+            print(f"  trend-{num} v{k}: {credit or '(no credit)'}")
         if arr:
             extra[num] = arr
 
